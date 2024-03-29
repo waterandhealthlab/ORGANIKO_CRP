@@ -1,0 +1,801 @@
+---
+title: "An anti-inflammatory response of an organic food intervention treatment by reducing pesticide exposures in children of Cyprus: a cluster-randomized crossover trial - Sensitivity Analysis Type 1 - part 1"
+output:
+  html_document: default
+  word_document: default
+authors: Cyprus International Institute for Environmental and Public Health, Cyprus
+  University of Technology, Limassol, Cyprus.
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+  
+## Sensitivity analysis Type 1 - part 1
+
+Sensitivity analysis was carried out to assess if there was any influence of extreme values on the observed associations between exposure and outcome. CRP raw measurements higher than the 99th percentile were excluded from the analysis and all models were rerun. 
+
+```{r libraries, include=FALSE}
+
+## Prepare workspace & install libraries
+rm(list = ls(all = TRUE))
+
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+# usage
+packages <- c("readxl","plyr","dtplyr","data.table","tidyr","knitr",
+              "tibble","Hmisc","tableone","compare","stargazer",
+              "readr","ggplot2","sjPlot","tidyverse","lubridate",
+              "eeptools", "Rcpp", "nlme", "lme4","lmerTest",
+              "texreg","reshape","scales","FSA","NADA",
+              "childsds", "sjPlot")
+
+ipak(packages)
+
+```
+
+```{r baseline data reading and inspection, include=FALSE}
+## Baseline questionnaire - Data inspection
+
+#Three files named:
+#- Baseline_Ques(Final) 250517-EA
+#- Baseline_Ques(Final) 250517-SI
+#- Baseline_Ques(Final) 250517-IC are located in the "Analysis" folder.
+
+#The compiled data file "mergedbaseline" contains 191 observations and 
+#72 variables. 
+
+#Variable names, description, type and valid values are described in the file:
+#"Variables characteristics" located in the same folder.
+
+#The below actions have been done for data inspection:
+
+#- Read data
+#- Merge the 3 files into 1
+#- Create school variable by deleting last 2 characters of Code
+#- Change variable types into factors/characters
+#- Format dates
+
+#Additional actions:
+
+#- Delete variable V20 because it contains no data 
+#- Convert 555 (missing values) to NA
+#- Calculate age at baseline
+
+#+ first subset in order to omit NA
+#+ merge baseline data with age data
+
+#-Merge baseline data with samples per participant data. The file "Samples per participant.csv" 
+#is located in the "Analysis" folder and contains 191 observations and 7 variables. Variable names, description, type and valid values are 
+#described in the file "Variables characteristics" located in the same folder.
+
+# read data & merge 
+baseline1<-read.csv(file="Data//Baseline_Ques(Final) 250517-EA.csv", 
+header=T, sep=";")
+baseline2<-read.csv(file="Data//Baseline_Ques(Final) 250517-SI.csv", 
+header=T, sep=";")
+baseline3<-read.csv(file="Data//Baseline_Ques(Final) 250517-IC.csv", 
+header=T, sep=";")
+
+baseline<-rbind.data.frame(baseline1, baseline2, baseline3)
+
+# merge baseline data with samples per participant data
+samplesperpart<-read.csv(file="Data//Samples and days per participant.csv", header=T, sep=";")
+# check variable types
+str(samplesperpart)
+
+# change code to factor
+samplesperpart$Code<- as.factor(samplesperpart$Code)
+
+mergedbaseline<-merge(baseline,samplesperpart, by="Code")
+
+```
+
+```{r recode variables, include=FALSE}
+# create school variable by deleting last 2 characters of Code 
+# Code needs to be a character
+mergedbaseline$Code<-as.character(mergedbaseline$Code)
+mergedbaseline$school<- substr(mergedbaseline$Code, 
+                               start=1,
+                               stop=nchar(mergedbaseline$Code)-2)
+
+
+# change variable types into factors
+mergedbaseline[, c("Editor", "Code", "Group", "Completion_study",
+                   "medulev", "Other_educational_level_m",
+                   "fedulev", "Gender", "handinmouth", "school")]<-lapply(
+                     mergedbaseline[, c("Editor", "Code", "Group", 
+                                        "Completion_study",
+                                        "medulev", "Other_educational_level_m",
+                                        "fedulev", "Gender", "handinmouth",
+                                        "school")], factor)
+
+# change variable types into characters
+mergedbaseline[, c("city_village", "product_name",
+                   "other_activity_name", "Other_Ctivity_name_1",
+                   "other_sedent_name", "Other_sedent_name_1")]<- lapply(
+                     mergedbaseline[, c("city_village",
+                                        "product_name", "other_activity_name",
+                                        "Other_Ctivity_name_1",
+                                        "other_sedent_name", 
+                                        "Other_sedent_name_1")], as.character)
+
+# format dates 
+mergedbaseline[, c("Qcompletion_date", "birthdate", "anthr_date_start",
+                   "anthr_date_endorg","anthr_date_endconv")]<-lapply(
+                     mergedbaseline[, c("Qcompletion_date", "birthdate",
+                                        "anthr_date_start",
+                                        "anthr_date_endorg",
+                                        "anthr_date_endconv")],
+                     as.Date, format="%d/%m/%Y")
+
+# delete variable V20 because it contains no data
+which(!is.na(mergedbaseline$V20))
+#16  29 180 184 186 189 191)
+mergedbaseline1<-subset(mergedbaseline, select=-V20) 
+
+# convert 555 (missing values) to NA
+mergedbaseline1[mergedbaseline1==555] <- NA
+str(mergedbaseline1)
+
+# create total samples number variable by adding all separate samples
+mergedbaseline1$totsamples<-with(mergedbaseline1, S1 + S2 + S3 + S4 + S5 + S6)
+
+# change totsamples variable  into factors
+mergedbaseline1$totsamples<-as.factor(mergedbaseline1$totsamples)
+
+# calculate age with decimals
+# calculate the age at the start of the study
+# subset with date start and birthdate in order to omit NA and calculate age_start
+# Make NA this birthdate "1900-01-05"
+mergedbaseline1[mergedbaseline1=="1900-01-05"] <- NA
+baseline_age1<-subset(mergedbaseline1, 
+                      select=c("Code","birthdate","anthr_date_start"))
+baseline_age1 <- na.omit(baseline_age1)
+baseline_age1$age_baseline<-with(baseline_age1, 
+                                 eeptools::age_calc(dob=birthdate, 
+                                          enddate=anthr_date_start, 
+                                          units = "years"))
+
+mergedbaseline_age1<-merge(mergedbaseline1, baseline_age1[c("Code","age_baseline")], by="Code",
+                           all = TRUE)
+
+# calculate the age at the end of the organic treatment
+baseline_age2<-subset(mergedbaseline1, 
+                      select=c("Code","birthdate","anthr_date_endorg"))
+baseline_age2 <- na.omit(baseline_age2)
+baseline_age2$age_endorg<-with(baseline_age2, 
+                               eeptools::age_calc(dob=birthdate,
+                                        enddate=anthr_date_endorg, 
+                                        units = "years"))
+
+mergedbaseline_age2<-merge(mergedbaseline_age1, 
+                           baseline_age2[c("Code","age_endorg")], by="Code",all = TRUE)
+
+# calculate the age at the end of the conventional treatment for Group 1 only
+baseline_age3<-subset(mergedbaseline1,
+                      select=c("Code","birthdate","anthr_date_endconv"))
+baseline_age3 <- na.omit(baseline_age3)
+baseline_age3$age_endcon<-with(baseline_age3, 
+                               age_calc(dob=birthdate,
+                                        enddate=anthr_date_endconv, 
+                                        units = "years"))
+
+mergedbaseline2<-merge(mergedbaseline_age2,
+                       baseline_age3[c("Code","age_endcon")], by="Code",all = TRUE)
+
+# revalue categorical variables to their actual values
+mergedbaseline2$Sex <- revalue(mergedbaseline2$Gender, 
+                               c("1"="Male", "2"="Female"))
+
+# calculate BMI based on formula: weight/height^2
+mergedbaseline2$BMI_start<-mergedbaseline2$Weight_start/
+                          ((mergedbaseline2$Height_start/100)^2)
+mergedbaseline2$BMI_endorg<-mergedbaseline2$Weight_endorg/
+                          ((mergedbaseline2$Height_endorg/100)^2)
+mergedbaseline2$BMI_endcon<-mergedbaseline2$Weight_endconv/
+                          ((mergedbaseline2$Height_endconv/100)^2)
+
+# calculate BMI SDS based on WHO 2007 growth references
+mergedbaseline2$BMI_start_sds <- sds(mergedbaseline2$BMI_start,
+                       age = mergedbaseline2$age_baseline,
+                       sex = mergedbaseline2$Sex, 
+                       male = "Male", female = "Female",
+                       ref = who2007.ref,
+                       item = "bmi",
+                       type = "SDS")
+
+mergedbaseline2$BMI_endorg_sds <- sds(mergedbaseline2$BMI_endorg,
+                       age = mergedbaseline2$age_endorg,
+                       sex = mergedbaseline2$Sex, 
+                       male = "Male", female = "Female",
+                       ref = who2007.ref,
+                       item = "bmi",
+                       type = "SDS")
+
+mergedbaseline2$BMI_endcon_sds <- sds(mergedbaseline2$BMI_endcon,
+                       age = mergedbaseline2$age_endcon,
+                       sex = mergedbaseline2$Sex, 
+                       male = "Male", female = "Female",
+                       ref = who2007.ref,
+                       item = "bmi",
+                       type = "SDS")
+
+# Check the new BMI variables
+summary(mergedbaseline2$BMI_start_sds)
+summary(mergedbaseline2$BMI_endorg_sds)
+summary(mergedbaseline2$BMI_endcon_sds)
+
+# create categories based on WHO cut-off points for 
+# thinness, normal, overweight and obese.
+# <-2: Thinness, 1>-2: Normal, >1: Overweight, >2: Obese
+mergedbaseline2$BMI_for_age_start <- cut(mergedbaseline2$BMI_start_sds,
+                               breaks=c(-Inf, -2, 1, 2, Inf),
+                               labels=c("Thinness","Normal","Overweight","Obese"))
+mergedbaseline2$BMI_for_age_endorg <- cut(mergedbaseline2$BMI_endorg_sds,
+                               breaks=c(-Inf, -2, 1, 2, Inf),
+                               labels=c("Thinness","Normal","Overweight","Obese"))
+mergedbaseline2$BMI_for_age_endcon <- cut(mergedbaseline2$BMI_endcon_sds,
+                               breaks=c(-Inf, -2, 1, 2, Inf),
+                               labels=c("Thinness","Normal","Overweight","Obese"))
+
+# revalue categorical variables to their actual values: 
+# For 6=Other, 7=Missing and 8=NA use NA
+mergedbaseline2$Group1 <- revalue(mergedbaseline2$Group, 
+                                  c("1"="First organic", "2"="First conventional"))
+mergedbaseline2$medulev1 <- revalue(mergedbaseline2$medulev, 
+                                    c("1"="Primary", "2"="Secondary", 
+                                      "3"="University/college", 
+                                      "4"="Master/PhD", "6"= NA,"7"=NA, "8"=NA))
+mergedbaseline2$fedulev1 <- revalue(mergedbaseline2$fedulev, 
+                                    c("1"="Primary", "2"="Secondary", 
+                                      "3"="University/college", 
+                                      "4"="Master/PhD", "6"=NA,"7"=NA, "8"=NA))
+mergedbaseline2$Handinmouth1 <- revalue(mergedbaseline2$handinmouth, 
+                                        c("0"="No", "1"="Yes","7"=NA))
+
+# recode Days_Org in categories 0-11 days (dropouts), 12-40 days (active participants)
+mergedbaseline2$daysorg <- cut(mergedbaseline2$Days_Org,
+                               breaks=c(-Inf, 11, 40),
+                               labels=c("Dropouts","Active participants"))
+
+# recode Days_Org in categories 0-11, 12-21, 22-28, 29-40
+mergedbaseline2$daysorgcat <- cut(mergedbaseline2$Days_Org,
+                               breaks=c(-Inf, 11, 21, 28, 40),
+                               labels=c("0-11 days","12-21 days","22-28 days","29-40 days"))
+
+# Last make the variable selection
+selectionDescr<-c("Group1","medulev1","fedulev1","Sex","age_baseline",
+                  "Waist_start", "Waist_endorg","Waist_endconv",
+                  "BMI_start","BMI_endorg","BMI_endcon",
+                  "BMI_for_age_start","BMI_for_age_endorg","BMI_for_age_endcon",
+                  "totsamples","daysorgcat","Handinmouth1")
+
+categorvariablesDescr<-c("Group1","medulev1","fedulev1","Sex",
+                         "BMI_for_age_start","BMI_for_age_endorg","BMI_for_age_endcon",
+                         "totsamples","daysorgcat","Handinmouth1")
+
+# convert NA values to 0 in columns where the times per week are denoted in order to be included in the stats
+mergedbaseline2[c("park_week","garden_week",
+                  "run_week", "cyc_week", "bask_week", "voll_week", "swim_week",
+                  "danc_week", "other_activity_time","Other_activity_time_1",
+                  "tv_week", "comp_week",
+                  "tablet_week", "mobile_week",
+                  "other_sedent_week","Other_sedent_week_1")][is.na(mergedbaseline2[c("park_week","garden_week",
+                  "run_week", "cyc_week", "bask_week", "voll_week", "swim_week",
+                  "danc_week", "other_activity_time","Other_activity_time_1",
+                  "tv_week", "comp_week",
+                  "tablet_week", "mobile_week",
+                  "other_sedent_week","Other_sedent_week_1")])] <- 0
+
+# summarize time spent outside
+mergedbaseline2$outside_time<-with(mergedbaseline2, park_week+garden_week)
+
+# summarize time spent for physical activities
+mergedbaseline2$physactiv_time<-with(mergedbaseline2, run_week+cyc_week+
+                                       bask_week+voll_week+swim_week+danc_week+
+                                       other_activity_time+Other_activity_time_1)
+
+# summarize time spent for sedentary activities
+mergedbaseline2$sedentactiv_time<-with(mergedbaseline2, tv_week+comp_week+
+                                                           tablet_week+mobile_week+
+                                                           other_sedent_week+
+                                                           Other_sedent_week_1)
+
+selectionActivities<-c("garden_week","park_week","run_week","cyc_week",
+                       "bask_week","foot_week","voll_week","swim_week",
+                       "danc_week","tv_week","comp_week", "tablet_week",
+                       "mobile_week","outside_time","physactiv_time",
+                       "sedentactiv_time")
+
+# create subset with participants with more than 12 days in the organic phase (active)
+mergedbaseline3<-droplevels(mergedbaseline2[which(mergedbaseline2$Days_Org > 11), ])
+
+# check normality of variables
+qqnorm(mergedbaseline3$Waist_start) 
+hist(mergedbaseline3$Waist_start)
+
+qqnorm(mergedbaseline3$physactiv_time)  
+hist(mergedbaseline3$physactiv_time)
+
+qqnorm(mergedbaseline3$sedentactiv_time) 
+hist(mergedbaseline3$sedentactiv_time)
+
+selectionnonnorm<-c("Waist_start", "Waist_endorg","Waist_endconv")
+selectionactnonnorm<-c("physactiv_time","sedentactiv_time")
+
+# create subset with participants with less than 12 days in the organic phase
+mergedbaselinedropouts<-droplevels(mergedbaseline2[which(mergedbaseline2$Days_Org < 12), ])
+
+# round age variables
+mergedbaseline3$age_baseline<-round(mergedbaseline3$age_baseline)
+mergedbaseline3$age_endorg<-round(mergedbaseline3$age_endorg)
+mergedbaseline3$age_endcon<-round(mergedbaseline3$age_endcon)
+
+```
+
+## Urinary data
+
+```{r Pesticides and biomarkers, include=FALSE}
+
+rm(list=setdiff(ls(),c("mergedbaseline3", "mergedbaseline2")))
+
+# Read measurements
+
+meas_sa_mdacr<-read.csv(file="Data//mda_cr_meas.csv", header=T, sep=";")
+str(meas_sa_mdacr)
+dim(meas_sa_mdacr)
+#941 3
+
+#Keep the samples that the creatinine measurements are between 0.3 and 3 g/L.
+meas_sa_mdacr_sp<-meas_sa_mdacr%>%
+ filter(creatinine>0.29)%>%
+  filter(creatinine<3.01)
+dim(meas_sa_mdacr_sp)
+#927 3
+#There are 941-927=14 samples that the creatinine measurements are lower than 0.3 and upper than 3 g/L
+
+meas_sa_pest<-read.csv(file="Data//Pesticides_meas.csv", header=T, sep=";")
+str(meas_sa_pest)
+dim(meas_sa_pest)
+#941 3
+
+#Units CRP:ng/L
+meas_sa_crpr<-read.csv(file="Data//crp_finals.csv", header=T)
+#Rename the columns
+colnames(meas_sa_crpr) <- c("sample_code", "crp")
+str(meas_sa_crpr)
+dim(meas_sa_crpr)
+#[1] 847   2
+
+q99<-quantile(meas_sa_crpr$crp,0.99,na.rm=TRUE)
+
+# Create the dataset for the sensitivity analysis
+meas_sa_crpr_sa=meas_sa_crpr[which(meas_sa_crpr$crp<q99),]
+
+# merge dataframes
+meas_sa_d<-Reduce(function(x, y) merge(x, y, all=TRUE, by="sample_code"), 
+               list(meas_sa_mdacr_sp,meas_sa_pest,meas_sa_crpr_sa))
+
+str(meas_sa_d)
+
+#length(which(is.na(meas_sa_d$creatinine)))
+#14
+#length(which(is.na(meas_sa_d$crp)))
+#94
+
+# Delete observations 2126-2, 2216-2, 6086-2 because they are double 
+# observations from participant 258 because excluded & 
+# delete observation 1004 because it is a non-existent sample
+meas_sa<-subset(meas_sa_d,!((meas_sa_d$sample_code == "2126-2")|
+              (meas_sa_d$sample_code == "2216-2")|
+              (meas_sa_d$sample_code == "6086-2")|
+              (meas_sa_d$sample_code == "2581")|
+              (meas_sa_d$sample_code == "2582")|
+              (meas_sa_d$sample_code == "2583")|
+              (meas_sa_d$sample_code == "1004")
+              ))
+str(meas_sa)
+
+# Extract 4 characters of sample code to have uniform codes 
+# (transforms sample codes 2126-1 to 2126 sample_code needs to be a character) 
+# rename to new variable to keep original
+meas_sa$sample_code0<-as.character(meas_sa$sample_code) 
+str(meas_sa)
+meas_sa$sample_code<-substr(meas_sa$sample_code0, start = 1, stop = 4)
+
+# create sample number variable by deleting first three characters of sample_code
+meas_sa$sample_no_orig = substr(meas_sa$sample_code, 4, 4)
+str(meas_sa)
+
+# transform sample codes of participants who followed the opposite pattern 
+# based on their school (203 & 259) so that they follow the same pattern with 
+# the rest participants --- it only changes the last character, so that the 
+# variable of phase can be created based on the conditional ifelse.
+# These transformed sample codes are used only for the creation of the phase
+# variable. For the statistical analysis, the original sample codes are used.
+meas_sa$sample_code1<-recode(meas_sa$sample_code, "2032"="2034",
+                          "2033"="2035", "2034"="2036",
+                          "2035"="2032","2036"="2033",
+                          "2593"="2595","2594"="2596",
+                          "2595"="2592","2596"="2593")
+str(meas_sa)
+
+# create ID variable by deleting last character of sample_code 
+meas_sa$Code<-as.character(meas_sa$sample_code)
+meas_sa$Code = substr(meas_sa$Code,1,nchar(meas_sa$Code)-1)
+
+# create sample number variable by deleting first three characters of sample_code1
+meas_sa$sample_no = substr(meas_sa$sample_code1, 4, 4)
+
+# create school variable by deleting last two characters of Code
+meas_sa$school = substr(meas_sa$Code,1,nchar(meas_sa$Code)-2) 
+
+# create phase variable using conditions for school and sample no 
+meas_sa$phase<-ifelse(
+  (meas_sa$school==1 | meas_sa$school==2 | meas_sa$school==6) & 
+    (meas_sa$sample_no==1 | meas_sa$sample_no==2 | meas_sa$sample_no==3), 
+  "Conventional", 
+  ifelse((meas_sa$school==3 | meas_sa$school==4 | meas_sa$school==5) & 
+           (meas_sa$sample_no==1 | meas_sa$sample_no==5 | meas_sa$sample_no==6),
+         "Conventional", 
+         "Organic"))
+
+str(meas_sa)
+
+# change variable types into factors
+meas_sa[, c("Code", "sample_no", "sample_code","sample_code1","school","phase")]<-
+  lapply(meas_sa[, c("Code", "sample_no", "sample_code","sample_code1","school","phase")],
+         factor)
+
+str(meas_sa)
+
+# merge baseline data with meas_saurement data
+# use the set with the 149 participants for the merging 
+meas_sa1<-droplevels(merge(meas_sa, mergedbaseline3, by="Code",all.y = TRUE))
+
+# create subset for organic treatment only 
+meas_sa_org<-meas_sa1 [which(meas_sa1$phase == "Organic"),]
+# create subset for conventional treatment only 
+meas_sa_con<-meas_sa1 [which(meas_sa1$phase == "Conventional"),]
+
+```
+
+Percentage of samples below the LOD and LOQ (Units Creatinine:g/l, 6CN:ug/l, 3PBA:ug/l, CRP:ng/L)
+
+Below LOQ (only for the pesticides and only for the whole period)
+
+6CN (<0.226), 3PBA (<0.146)
+
+- 6CN: `r round(perc(meas_sa1$cna, 0.226, dir = c("leq"), na.rm = TRUE), digits=2)`
+
+- 3PBA: `r round(perc(meas_sa1$pba, 0.146, dir = c("leq"), na.rm = TRUE), digits=2)`
+
+Below LOD 
+
+Creatinine (<0.25), 6CN (<0.075), 3PBA (<0.049), CRP (<62.5)
+
+- Overall
+
++ Creatinine: `r round(perc(meas_sa1$creatinine, 0.25, dir = c("leq"), na.rm = TRUE), digits=2)`
+
++ CRP: `r round(perc(meas_sa1$crp, 62.5, dir = c("leq"), na.rm = TRUE), digits=2)`
+
++ 6CN: `r round(perc(meas_sa1$cna, 0.075, dir = c("leq"), na.rm = TRUE), digits=2)`
+
++ 3PBA: `r round(perc(meas_sa1$pba, 0.049, dir = c("leq"), na.rm = TRUE), digits=2)`
+
+- Organic phase
+
++ CRP: `r round(perc(meas_sa_org$crp, 62.5, dir = c("leq"), na.rm = TRUE), digits=2)`
+
++ 6CN: `r round(perc(meas_sa_org$cna, 0.075, dir = c("leq"), na.rm = TRUE), digits=2)`
+
++ 3PBA: `r round(perc(meas_sa_org$pba, 0.049, dir = c("leq"), na.rm = TRUE), digits=2)`
+
+- Conventional phase (including the baseline)
+
++ CRP: `r round(perc(meas_sa_con$crp, 62.5, dir = c("leq"), na.rm = TRUE), digits=2)`
+
++ 6CN: `r round(perc(meas_sa_con$cna, 0.075, dir = c("leq"), na.rm = TRUE), digits=2)`
+
++ 3PBA: `r round(perc(meas_sa_con$pba, 0.049, dir = c("leq"), na.rm = TRUE), digits=2)`
+
+
+```{r 6CN values below LOD, include=FALSE}
+
+rm(meas_sa_con, meas_sa_org) # remove the sets created before (no longer needed)
+
+# since high percentage of samples below LOD for 6CN 
+# check distribution of 6CN values in sampling points per group
+# create categorical variables for below and above LOD values for 6-CN
+# 6CN: <0.075: Below LOD, >0.075: Above LOD
+meas_sa1$cnlod <- cut(meas_sa1$cna,
+                  breaks=c(-Inf, 0.075, Inf),
+                  labels=c("Below LOD","Above LOD"))
+
+```
+
+## Biomarkers descriptives
+
+### Table 1 - Percentage of 6-CN values below and above LOD by sample by group
+
+`r kable(print(CreateTableOne("cnlod", data=meas_sa1, strata=c("sample_no_orig","Group"), test=FALSE)), caption="Percentage of 6-CN values below and above LOD for 149 participants by group and by sample")`
+
+
+```{r lod imputation, include=FALSE}
+
+# only the <LOD imputed
+
+# replace values below LOD with LOD/2 for: 
+# Creatinine (<0.25 = 0.13) 
+# since the percentage of values below LOD is about 1%
+meas_sa1<-meas_sa1%>%
+  mutate(cr=ifelse(creatinine > 0.25,creatinine,0.13))
+
+# replace values below LOD imputation using ros function 
+# for 6CN (<0.075), 3PBA (<0.049) because the percentage of values below LOD is higher than 20%
+
+# first create logical vector with TRUE indicating <LOD & FALSE >LOD
+meas_sa1$pba1<-ifelse(meas_sa1$pba<0.049, TRUE, FALSE)
+
+str(meas_sa1$pba1)
+
+# call the ros function
+rospba<-ros(meas_sa1$pba, meas_sa1$pba1,forwardT="log", reverseT="exp", na.action=NULL)
+
+# convert the modeled data in a ros model to a dataframe
+rospba<-as.data.frame(rospba)
+
+# sort meas_sa1 dataframe by pba
+meas_sa1 <- meas_sa1[order(meas_sa1$pba),] 
+
+# sort meas_sa1 dataframe by pba
+meas_sa1 <- meas_sa1[order(meas_sa1$pba),] 
+
+# merge meas_sa1 with rospba
+meas_sa1<-cbind.data.frame(meas_sa1,rospba)
+
+# rename columns for rospba 
+names(meas_sa1)[names(meas_sa1) == 'obs'] <- 'obs_pb'
+names(meas_sa1)[names(meas_sa1) == 'censored'] <- 'censored_pb'
+names(meas_sa1)[names(meas_sa1) == 'pp'] <- 'pp_pb'
+
+# create variable for 3-pba with modelled values for below LOD 
+# (values above LOD don't change in the model)
+names(meas_sa1)[names(meas_sa1) == 'modeled'] <- 'pb'
+
+#So, we will use the cr, cnlod and pb.
+
+```
+
+```{r biomarkers descriptives, include=FALSE}
+
+# From now on working on ng/L for 6CN, 3PBA
+meas_sa1$pb1000<-meas_sa1$pb*1000
+
+# adjust for creatinine 
+meas_sa1$adj_pb1000<-meas_sa1$pb1000/meas_sa1$cr
+meas_sa1$adj_crp<-meas_sa1$crp/meas_sa1$cr
+
+# select raw and adjusted variables
+sel_raw<-c("pb1000","crp","cr")
+
+sel_adj<-c("adj_pb1000","adj_crp","cr")
+
+# quantiles - removed creatinine and rearranged them to follow the necessary table order
+
+pb_q<-round(quantile(meas_sa1$pb1000, c(0, .05,.25,.5,.75,.95,1),na.rm=TRUE), digits=2)
+crp_q<-round(quantile(meas_sa1$crp, c(0, .05,.25,.5,.75,.95,1), na.rm=TRUE), digits=2)
+cr_q<-round(quantile(meas_sa1$cr, c(0, .05,.25,.5,.75,.95,1), na.rm=TRUE), digits=2)
+
+crpb_q<-round(quantile(meas_sa1$adj_pb1000, c(0, .05,.25,.5,.75,.95,1),na.rm=TRUE), digits=2)
+crp_q_adj<-round(quantile(meas_sa1$adj_crp, c(0, .05,.25,.5,.75,.95,1),na.rm=TRUE), digits=2)
+
+quantiles_raw<-rbind(pb_q,crp_q, cr_q)
+quantiles_adj<-rbind(crpb_q,crp_q_adj)
+
+# quantiles by treatment 
+meas_saorg<-meas_sa1 [which(meas_sa1$phase == "Organic"),]
+
+crp_qorg<-round(quantile(meas_saorg$crp, c(0, .05,.25,.5,.75,.95,1), na.rm=TRUE), digits=2)
+
+crp_qorg_adj<-round(quantile(meas_saorg$adj_crp, c(0, .05,.25,.5,.75,.95,1), na.rm=TRUE), digits=2)
+
+cr_qorg<-round(quantile(meas_saorg$cr, c(0, .05,.25,.5,.75,.95,1), na.rm=TRUE), digits=2)
+
+# select raw and adjusted quantiles in organic period
+quantiles_rawo<-rbind(crp_qorg)
+quantiles_adjo<-rbind(crp_qorg_adj)
+
+meas_sacon<-meas_sa1 [which(meas_sa1$phase == "Conventional"),]
+
+crp_qcon<-round(quantile(meas_sacon$crp, c(0, .05,.25,.5,.75,.95,1), na.rm=TRUE), digits=2)
+
+crp_qcon_adj<-round(quantile(meas_sacon$adj_crp, c(0, .05,.25,.5,.75,.95,1), na.rm=TRUE), digits=2)
+
+cr_qcon<-round(quantile(meas_sacon$cr, c(0, .05,.25,.5,.75,.95,1), na.rm=TRUE), digits=2)
+
+# select raw and adjusted quantiles in conventional period
+quantiles_rawc<-rbind(crp_qcon)
+quantiles_adjc<-rbind(crp_qcon_adj)
+
+```
+
+### Table 2 - Percentiles of CRP, 6CN, 3PBA (overall)
+
+- Note: the tables are based on the imputed data
+
+- Units: CRP:ng/L, 3PBA:ng/L
+
+`r kable (print(quantiles_raw), caption="Quantiles of the raw concentrations")`
+
+- Units: crp:ng/L Cr, 3PBA:ng/L
+
+`r kable (print(quantiles_adj), caption="Quantiles of the creatinine adjusted concentrations")`
+
+### Table 2 A - Percentiles of CRP during the organic treatment
+
+- Note: the tables are based on the imputed data
+
+- Units: CRP:ng/L
+
+`r kable (print(quantiles_rawo), caption="Quantiles of the raw concentrations during the organic treatment")`
+
+- Units: CRP:ng/L
+
+`r kable (print(quantiles_adjo), caption="Quantiles of the creatinine adjusted concentrations during the organic treatment")`
+
+
+### Table 2 B - Percentiles of CRP during the conventional treatment
+
+- Note: the tables are based on the imputed data
+
+- Units: crp:ng/L
+
+`r kable (print(quantiles_rawc), caption="Quantiles of the raw concentrations during the conventional treatment")`
+
+- Units: crp:ng/L Cr
+
+`r kable (print(quantiles_adjc), caption="Quantiles of the creatinine adjusted concentrations during the conventional treatment")`
+
+
+```{r Summary tables, include=FALSE}
+
+# For % change between baseline and after 40 days of organic diet, 
+# we need the sample before the 
+# beginning of the organic treatment and the last sample of the organic treatment
+
+# sample before organic treatment for Group 1 -> baseline or sample no=1
+# last sample of organic treatment for Group 1 -> sample no=4
+# sample before organic treatment for Group 2 -> last sample of conventional treatment or 
+# sample no=3
+# last sample of organic treatment for Group 2 -> sample no=6
+
+# check normality of variables
+qqnorm(meas_sa1$pb1000)#NOT normal
+qqnorm(meas_sa1$crp) #NOT normal
+
+qqnorm(meas_sa1$adj_pb1000)#NOT normal
+qqnorm(meas_sa1$adj_crp)#NOT normal
+
+# log-transform urinary data
+meas_sa1$logpb1000<-log(meas_sa1$pb1000)
+meas_sa1$logcrp<-log(meas_sa1$crp) 
+
+meas_sa1$logadj_pb1000<-log(meas_sa1$adj_pb1000)
+meas_sa1$logadj_crp<-log(meas_sa1$adj_crp) 
+
+# check normality of variables again
+qqnorm(meas_sa1$logpb1000)# normal
+hist(meas_sa1$logpb1000)
+qqnorm(meas_sa1$logcrp)
+hist(meas_sa1$logcrp)
+
+qqnorm(meas_sa1$logadj_pb1000)
+qqnorm(meas_sa1$logadj_crp)# normal
+
+hist(meas_sa1$logadj_pb1000)
+hist(meas_sa1$logadj_crp)
+
+```
+
+### Table 3 - Summary tables of pesticide metabolites, creatinine and CRP
+
+- Note: the tables are based on the imputed data
+
+- Units: ng/L for CRP, 3-PBA, g/L for creatinine
+
+`r kable(print(CreateContTable(sel_raw, data=meas_sa1, testNonNormal = kruskal.test, smd=F), nonnormal=sel_raw), caption="Summary table of meas_saurements - non-creatinine adjusted")`
+
+- Units: ng/L for CRP, 3-PBA, g/L for creatinine
+
+`r kable(print(CreateContTable(sel_adj, data=meas_sa1, testNonNormal = kruskal.test, smd=F), nonnormal=sel_raw), caption="Summary table of meas_saurements -Creatinine adjusted")`
+
+### Table 3 A - Summary tables of pesticide metabolites, creatinine and CRP by treatment
+
+- Note: the tables are based on the imputed data
+
+- Units: ng/L for CRP, 3-PBA, g/L for creatinine
+
+`r kable(print(CreateContTable(sel_raw, strata=c("phase"),meas_sa1, testNonNormal = kruskal.test, smd=F), nonnormal=sel_raw), caption="Summary table of meas_saurements per phase - non-creatinine adjusted")`
+
+- Units: ng/L for CRP, 3-PBA, g/L for creatinine
+
+`r kable(print(CreateContTable(sel_adj, strata=c("phase"),meas_sa1, testNonNormal = kruskal.test,smd=F), nonnormal=sel_adj), caption="Summary table of meas_saurements per phase - Creatinine adjusted")`
+
+
+## Boxplots
+
+The boxplots are included in the script as additional material to what is included in the manuscript. The boxplots are not included in the manuscript.
+In the boxplots of CRP the upper 5% of values have been excluded to make the plots easier to read. Imputed data are included. 
+
+```{r boxplots, echo=FALSE}
+# plot meas_saurements per sample  per group
+length(which(is.na(meas_sa1$crp)))
+#7
+
+length(which(is.na(meas_sa1$crp[meas_sa1$crp < quantile(meas_sa1$crp, 0.95,na.rm=TRUE)])))
+#7
+
+is.numeric(meas_sa1$crp)
+#TRUE
+
+#Remove the na of the meas_sa$crp
+
+meas_sa_nonna<-meas_sa1%>% filter(!is.na(crp))
+
+ggplot(meas_sa_nonna[meas_sa_nonna$crp < quantile(meas_sa_nonna$crp, 0.95,na.rm=TRUE), ], 
+       aes(x=sample_no_orig, y=crp, fill=phase))+
+  geom_boxplot()+
+  facet_grid(~Group1)+
+  theme_light()+
+  ylab("crp (ng/l) - excl. >0.95")+
+  xlab("")+
+  scale_fill_brewer(palette ="Greens")+ 
+  theme(legend.position="bottom")
+
+meas_sa_nonna_adj<-meas_sa1%>% filter(!is.na(adj_crp))
+
+ggplot(meas_sa_nonna_adj[meas_sa_nonna_adj$adj_crp < quantile(meas_sa_nonna_adj$adj_crp, 0.95,na.rm=TRUE), ], 
+       aes(x=sample_no_orig, y=adj_crp, fill=phase))+
+  geom_boxplot()+
+  facet_grid(~Group1)+
+  theme_light()+
+  ylab("creatinine adjusted crp - excl. >0.95")+
+  xlab("")+
+  scale_fill_brewer(palette ="Greens")+ 
+  theme(legend.position="bottom")
+
+
+ggplot(meas_sa_nonna_adj[meas_sa_nonna_adj$logadj_crp < quantile(meas_sa_nonna_adj$logadj_crp, 0.95,na.rm=TRUE), ], 
+       aes(x=sample_no_orig, y=logadj_crp, fill=phase))+
+  geom_boxplot()+
+  facet_grid(~Group1)+
+  theme_light()+
+  ylab("log creatinine adjusted crp- excl. >0.95")+
+  xlab("")+
+  scale_fill_brewer(palette ="Greens")+ 
+  theme(legend.position="bottom")
+
+```
+
+```{r save}
+dir_path<-getwd() # working dir to be used in making the new file bel
+analysis_rds_dir<-paste0(dir_path, "/produced_data", sep="")
+if(!dir.exists(analysis_rds_dir)) dir.create(analysis_rds_dir)
+
+saveRDS(meas_sa1, file.path(analysis_rds_dir, "meas_sa1.rds"))
+```
+
+# Session information
+
+```{r session}
+sessionInfo()
+```

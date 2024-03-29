@@ -1,0 +1,1045 @@
+---
+title: "An anti-inflammatory response of an organic food intervention treatment by reducing pesticide exposures in children of Cyprus: a cluster-randomized crossover trial - Part 2"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+  word_document:
+    toc: yes
+authors: Cyprus International Institute for Environmental and Public Health, Cyprus
+  University of Technology, Limassol, Cyprus.
+---
+
+# Regression analysis (mixed effects models)
+
+This script includes the regression analysis (Part 2).
+The output of the Part 1 script needs to be created (produced_data/meas1).
+
+```{r libraries, include=FALSE}
+
+## Prepare workspace & install libraries
+
+rm(list = ls(all = TRUE))
+
+ipak <- function(pkg) {
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) {
+    install.packages(new.pkg, dependencies = TRUE)
+  }
+  sapply(pkg, require, character.only = TRUE)
+}
+
+# usage
+packages <- c(
+  "readxl", "plyr", "dtplyr", "data.table", "tidyr", "knitr",
+  "tibble", "Hmisc", "tableone", "compare", "stargazer",
+  "readr", "ggplot2", "sjPlot", "tidyverse", "lubridate",
+  "eeptools", "Rcpp", "nlme", "lme4", "lmerTest",
+  "texreg", "reshape", "scales", "FSA", "NADA",
+  "childsds", "sjPlot","ggpubr"
+)
+
+ipak(packages)
+
+```
+
+```{r linear mixed effect models - prepare database, echo=FALSE, include=FALSE}
+
+# read the output of part 1
+dir_path <- getwd()
+meas1 <- readRDS(paste0(dir_path, "/produced_data/meas1.rds", sep = ""))
+
+# create dataset with variables needed for the regression analysis 
+lmmdata <- subset(meas1, select = c(
+  "Code", "phase", "school.x",
+  "sample_no_orig", "Group",
+  "age_baseline", "age_endcon", "age_endorg",
+  "Sex","logadj_crp","logcrp","cnlod","adj_pb1000","pb1000","cr","logcr" 
+))
+
+# scale and center continuous variables
+lmmdata$logadj_crp_S <- scale(lmmdata$logadj_crp)
+
+lmmdata$logcrp_S <- scale(lmmdata$logcrp)
+
+lmmdata$age_baseline_S <- scale(lmmdata$age_baseline)
+
+lmmdata$adj_pb1000_S<-scale(lmmdata$adj_pb1000)
+
+lmmdata$pb1000_S<-scale(lmmdata$pb1000)
+
+lmmdata$creatinine_S<-scale(lmmdata$cr)
+
+lmmdata$logcr_S<-scale(lmmdata$logcr)
+
+# create a variable that denotes the "before(=1)" sample (which is sample no.1)
+# and the "after(=2)" sample (no.4 for Group 1 and no.6 for Group 2)
+# all other samples set to '9'
+# This variable is used for the subsetting of the BMI dataset
+lmmdata$before_after <- ifelse((lmmdata$sample_no_orig == 1),
+  1,
+  ifelse((lmmdata$sample_no_orig == 4 &
+    lmmdata$Group == "1"),
+  2,
+  ifelse((lmmdata$sample_no_orig == 6 &
+    lmmdata$Group == "2"),
+  2,
+  9
+  )
+  )
+)
+
+# reform dataset - Change variable types into factors/numeric
+lmmdata <- droplevels(lmmdata)
+lmmdata$ID <- as.factor(paste("P", lmmdata$Code, sep = ""))
+lmmdata$SCID <- as.factor(paste("S", lmmdata$school.x, sep = ""))
+lmmdata$GID <- as.factor(paste("G", lmmdata$Group, sep = ""))
+lmmdata$ST <- as.numeric(lmmdata$sample_no_orig)
+
+# import sample dates
+#- from the original file
+#- Kept only white cap rows
+#- Deleted all columns besides code and date
+#- 941 rows with participant samples left
+#- Deleted double samples 6086-2, 2126-2, 2216-2
+#- calculate days from baseline
+#- Calculate days from treatment only for conventional phase
+
+# read excel file
+sample_dates <- read_excel("Data\\sample_dates.xlsx",
+  col_types = c("text", "date")
+)
+
+# add ID
+sample_dates$ID <- paste("P", substr(sample_dates$sample_code,
+  start = 1,
+  stop = 3
+), sep = "")
+# add sample number
+sample_dates$sample_no_orig <- as.character(substr(sample_dates$sample_code,
+  start = 4, stop = 4
+))
+# create new dataset with ID, sample number and sampling date
+unique_sample_dates <- unique(sample_dates[, c(
+  "ID", "sample_no_orig",
+  "sampling_date"
+)])
+# create dataset that has 1 new variable:
+# Diff: the difference in days between each sample for each participant
+df <- unique_sample_dates %>%
+  group_by(ID) %>%
+  mutate(Diff = c(0, diff(sampling_date)))
+
+# merge df dataset with lmmdata dataset by ID and sample number
+lmmdata_dates <- inner_join(df, lmmdata, by = c("ID", "sample_no_orig"))
+
+# subset and include only conventional treatment samples
+lmmdata_dates1 <- subset(lmmdata_dates, lmmdata_dates$phase == "Conventional")
+
+# Using the variable for the number of days (Diff) to sum the cummulative
+# number of days from the start of the conventional treatment by participant
+lmmdata_dates2 <- lmmdata_dates1 %>%
+  group_by(ID) %>%
+  mutate(DaysfromTreatment = cumsum(Diff))
+
+# summary(lmmdata_dates2$DaysfromTreatment)
+
+# remove sets no longer needed
+rm(lmmdata_dates, lmmdata_dates1)
+
+# For some participants the organic phase started a few days after the collection of the
+# baseline sample or the last conventional phase sample. The date of the start of the
+# organic phase has been used as a reference to calculate the number of days from the
+# start of organic phase. The corrected dates (differing in the sample 1 - baseline -,
+# or sample 3 - the last sample of the conventional phase -) are included in this
+# dataset (referred to as "organic treatment start dates")
+
+# import organic treatment start dates
+# sampling date different than start of organic treatment so for actual days of organic treatment this file was used
+# calculate days from baseline
+# Calculate days from treatment only for organic phase
+
+# read excel file
+org_dates <- read_excel("Data\\org_start_dates.xlsx",
+  col_types = c("text", "date")
+)
+
+# add ID
+org_dates$ID <- paste("P", substr(org_dates$sample_code,
+  start = 1,
+  stop = 3
+), sep = "")
+# add sample no
+org_dates$sample_no_orig <- as.character(substr(org_dates$sample_code,
+  start = 4, stop = 4
+))
+# create new dataset with ID, sample number and sampling date
+unique_org_dates <- unique(org_dates[, c(
+  "ID", "sample_no_orig",
+  "sampling_date"
+)])
+# create dataset that has 1 new variable:
+# Diff: the difference in days between each sampling for each participant
+df1 <- unique_org_dates %>%
+  group_by(ID) %>%
+  mutate(Diff = c(0, diff(sampling_date)))
+
+# merge df dataset with lmmdata dataset by ID and sample number
+lmmdata_dates3 <- inner_join(df1, lmmdata, by = c("ID", "sample_no_orig"))
+
+# subset and include only organic treatment samples
+lmmdata_dates4 <- subset(lmmdata_dates3, lmmdata_dates3$phase == "Organic")
+
+# Using the variable for the number of days (Diff) to sum the cummulative
+# number of days from the start of the organic treatment by participant
+lmmdata_dates5 <- lmmdata_dates4 %>%
+  group_by(ID) %>%
+  mutate(DaysfromTreatment = cumsum(Diff))
+
+# summary(lmmdata_dates5$DaysfromTreatment)
+
+# remove datasets not needed
+rm(lmmdata_dates3, lmmdata_dates4)
+
+# merge datasets to include all samples
+lmmdata_dates_final <- rbind.data.frame(lmmdata_dates2, lmmdata_dates5)
+
+# remove datasets not needed
+rm(lmmdata_dates2, lmmdata_dates5)
+
+# exclude baseline sample
+lmmdata_noBL <- subset(lmmdata_dates_final, ST >= 2)
+
+# include baseline sample and biomarkers
+lmmdata_onlyBL <- subset(
+  lmmdata_dates_final[c(
+    "ID", "logadj_crp_S", "ST","logcrp_S"
+  )],
+  ST <= 1
+)
+
+# str(lmmdata_onlyBL)
+
+# merge datasets without baseline and with baseline for biomarkers
+lmmdata_dates_MOD <- merge(lmmdata_onlyBL, lmmdata_noBL, by = "ID", all.y = TRUE, suffixes = c("_BL", "_TR"))
+# the baseline_samples end in _BL
+
+# check the variable DaysfromTreatment
+summary(lmmdata_dates_MOD$DaysfromTreatment)
+
+analysis_rds_dir<-paste0(dir_path, "/produced_data", sep="")
+if(!dir.exists(analysis_rds_dir)) dir.create(analysis_rds_dir)
+
+saveRDS(lmmdata_dates_MOD, file.path(analysis_rds_dir, "lmmdata_dates_MOD.rds"))
+
+# remove sets no longer needed and keep only the ones that are going to be used
+rm(list = setdiff(
+  ls(),
+  c(
+    "lmmdata_dates_MOD", # dataset that includes baseline as a variable
+    "lmmdata_noBL", # baseline excluded
+    "lmmdata_dates_final" # all data
+  )
+))
+
+# vector with the titles of the rows used in the model specifications
+rowtitles <- c(
+  "Number of measurements",
+  "Number of participants",
+  "Number of schools"
+)
+# CK: The below functions should be deleted if not used anywhere..
+
+# Function to exponentiate the estimates and CIs of the phase
+OrganicPhaseExpEST<-function(x) {
+  est<-subset(x, Row.names=="phaseOrganic", select=c("Estimate","CI2.5","CI97.5"))
+  est2<-round(exp(est), digits=3)
+  rm(est)
+  names(est2)<-c("GMR", "CI2.5","CI97.5")
+  est2
+}
+
+# Function to exponentiate the estimates and CIs of the phase
+logadj_crp_S_TRExpEST<-function(x) {
+  est<-subset(x, Row.names=="logadj_crp_S_TR", select=c("Estimate","CI2.5","CI97.5"))
+  est2<-round(exp(est), digits=3)
+  rm(est)
+  names(est2)<-c("GMR", "CI2.5","CI97.5")
+  est2
+}
+
+#Create a new dataframe the specific column of lmmdata_dates_MOD and keep the non na values
+visua<-lmmdata_dates_MOD%>% select(ID,logadj_crp_S_TR, logcrp_S_TR,phase,DaysfromTreatment)%>%filter(!is.na(logadj_crp_S_TR))
+
+```
+## Visualization
+
+Visualize the association between the creatinine adjusted crp measurements and the time and the non creatinine crp adjusted measurements and the days from treatment.
+
+*  Both measurements (creatinine adjusted crp and non creatinine adjusted crp) are log transformed.
+
+__Plot 1. Association between the CRP measurements (adjusted and non adjusted) and the days from treatment for the organic phase__ 
+
+```{r visua_crp organic period, echo=FALSE}
+
+visua_org<-visua%>%filter(phase=="Organic")
+
+org1<-ggplot(data = visua_org, aes(x = DaysfromTreatment, y = logadj_crp_S_TR))+ geom_point(color="darkred")+labs(x = "Days from treatment",y = "Creatinine-adj, scaled and centered CRP measurements") 
+
+org2<-ggplot(data = visua_org, aes(x = DaysfromTreatment, y = logcrp_S_TR))+ geom_point(color="darkblue")+labs(x = "Days from treatment",y = "Non-creatinine adj, scaled and centered CRP measurements") 
+
+plot_org<-ggarrange(org1, org2,ncol = 2, nrow = 1)
+
+annotate_figure(plot_org, top = text_grob("Organic phase", color = "black", face = "bold", size = 14))
+
+```
+__Plot 2. Association between the CRP measurements (adjusted and non adjusted) and the days from treatment for the conventional phase__
+
+```{r visua_crp conventional period, echo=FALSE}
+
+visua_con<-visua%>%filter(phase=="Conventional")
+
+conv1<-ggplot(data = visua_con, aes(x = DaysfromTreatment, y = logadj_crp_S_TR))+ geom_point(color="darkred")+labs(x = "Days from treatment",y = "Creatinine-adj, scaled and centered CRP measurements") 
+
+conv2<-ggplot(data = visua_con, aes(x = DaysfromTreatment, y = logcrp_S_TR))+ geom_point(color="darkblue")+labs(x = "Days from treatments",y = "Non-creatinine adj, scaled and centered CRP measurements") 
+
+plot_con<-ggarrange(conv1, conv2,ncol = 2, nrow = 1)
+
+annotate_figure(plot_con, top = text_grob("Conventional phase", color = "black", face = "bold", size = 14))
+
+```
+
+__Plot 3. Association between the creatinine adjusted CRP measurements and the days from treatment for each phase__
+
+```{r plot, echo=FALSE}
+
+ggplot(data = visua, aes(x = DaysfromTreatment, y = logadj_crp_S_TR, color = phase))+ geom_point()+facet_wrap(facets = vars(phase))+labs(x = "Days from treatment",y = "Creatinine-adj, scaled and centered CRP measurements") 
+
+```
+
+__Plot 4. Association between the non-creatinine adjusted CRP measurements and the days from treatment for each phase__
+
+``` {r plot 2, echo=FALSE}
+
+ggplot(data = visua, aes(x = DaysfromTreatment, y = logcrp_S_TR, color = phase))+ geom_point()+facet_wrap(facets = vars(phase))+labs(x = "Days from treatment",y = "Non-creatinine adj, scaled and centered CRP measurements") 
+
+```
+
+## Main analysis
+
+All models were adjusted for the baseline value of the outcome.
+
+All models were adjusted for the creatinine levels using two ways:
+
+*  CRP and pesticides measurements were divided with the respective creatinine measurements
+*  Creatinine was included as a fixed effect
+
+Initial model (model for objective 1):
+
+ + Random part: participants
+ + Fixed effect: treatment condition (organic or conventional) and time (days of treatment, where time=0 was the start of the treatment)
+ + Interaction term: time*phase
+*  Check interaction term:
+  + if p-value>0.05 remove from the model
+  
+### Log creatinine adjusted CRP ~ baseline log creatinine adjusted CRP + DaysfromTreatment + phase + (phase*DaysfromTreatment if p<0.05) + random(...)
+
+__Initial model (including the interaction term)__
+
+```{r  crpmodel_INT, echo=FALSE, include=FALSE}
+
+# model with interaction term
+model_crp <- lmer(logadj_crp_S_TR ~ logadj_crp_S_BL + DaysfromTreatment + phase + DaysfromTreatment*phase + (1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+# summary(model_crp)
+coefs_crp_INT <- merge(
+  as.data.frame(
+    round(
+      # getting from the model coefficients table
+      # the fixed effects names --- row.names
+      # the estimate --- col. 1
+      # the std. error --- col. 2
+      # the p-value --- col. 5
+      coef(summary(model_crp))[, c(1, 2, 5)],
+      digits = 3
+    )
+  ),
+  as.data.frame(
+    round(
+      # getting the confidence intervals omitting the first 3 rows that
+      # refer to sigma (it is NA in the Wald method)
+      confint.merMod(model_crp, method = "Wald"),
+      digits = 3
+    )[-c(1:3), ]
+  ),
+  by = "row.names"
+)
+
+# change the names in the columns of the CIs
+setnames(coefs_crp_INT, old = c("Pr(>|t|)", "2.5 %", "97.5 %"), new = c("p", "CI2.5", "CI97.5"))
+
+coefs_crp_INT$Model <- "crpadjusted_INT"
+
+# revalue the fixed effects names
+coefs_crp_INT$FixedEffects <- revalue(
+  coefs_crp_INT$Row.names,
+  c(
+    "(Intercept)" = "Intercept",
+    "DaysfromTreatment" = "Time (days)",
+    "DaysfromTreatment:phaseOrganic"="Days*Phase",
+    "phaseOrganic" = "Organic diet",
+    "logadj_crp_S_BL" = "Baseline crp levels"
+  )
+)
+
+model_specs_crp <- c(
+  # Number of measurements taken from the length of the outcome variable used in the model
+  length(model_crp@frame$logadj_crp_S_TR),
+  # Number of participants taken from the levels of the ID variables
+  nlevels(model_crp@frame$ID),
+  # Number of schools taken from the model details
+  nlevels(model_crp@flist$SCID)
+)
+
+# add the row titles to the model specs
+obs_dets_crp <- data.frame(rowtitles, model_specs_crp)
+names(obs_dets_crp) <- c("Model details", "")
+
+```
+
+```{r tabmpdel Model 1, echo=FALSE, include=TRUE}
+# crp
+tab_model(model_crp,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(model_crp@call$formula[3]))
+# model has been inspected: interaction term p-value<0.05
+
+```
+
+```{r model_crp, echo=FALSE}
+
+plot(model_crp, resid(.) ~ fitted(.) | phase)
+
+plot(model_crp, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(model_crp))
+
+```
+
+### Log CRP ~ baseline Log CRP + DaysfromTreatment + phase + creatinine_S + (phase*DaysfromTreatment if p<0.05) + random(...)
+
+```{r  crpmodel_INT logcr int, echo=FALSE, include=FALSE}
+
+# model with interaction term
+model_crp_cr_INT <- lmer(logcrp_S_TR ~ logcrp_S_BL + DaysfromTreatment + phase + creatinine_S + phase*DaysfromTreatment +(1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+```
+
+```{r tabmpdel Model logcr int, echo=FALSE, include=TRUE}
+# crp
+
+tab_model(model_crp_cr_INT,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(model_crp_cr_INT@call$formula[3]))
+# model has been inspected: interaction term p-value>0.05
+
+```
+
+```{r plots_model_crp_cr_INT, echo=FALSE}
+
+plot(model_crp_cr_INT, resid(.) ~ fitted(.) | phase)
+
+plot(model_crp_cr_INT, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(model_crp_cr_INT))
+
+```
+
+
+```{r  crpmodel_cr_nonINT , echo=FALSE, include=FALSE}
+
+# model without interaction term
+model_crp_cr_nonINT <- lmer(logcrp_S_TR ~ logcrp_S_BL + DaysfromTreatment + phase + creatinine_S +(1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+# summary(model_crp_cr_nonINT)
+coefs_crp_cr_nonINT <- merge(
+  as.data.frame(
+    round(
+      # getting from the model coefficients table
+      # the fixed effects names --- row.names
+      # the estimate --- col. 1
+      # the std. error --- col. 2
+      # the p-value --- col. 5
+      coef(summary(model_crp_cr_nonINT))[, c(1, 2, 5)],
+      digits = 3
+    )
+  ),
+  as.data.frame(
+    round(
+      # getting the confidence intervals omitting the first 3 rows that
+      # refer to sigma (it is NA in the Wald method)
+      confint.merMod(model_crp_cr_nonINT, method = "Wald"),
+      digits = 3
+    )[-c(1:3), ]
+  ),
+  by = "row.names"
+)
+
+# change the names in the columns of the CIs
+setnames(coefs_crp_cr_nonINT, old = c("Pr(>|t|)", "2.5 %", "97.5 %"), new = c("p", "CI2.5", "CI97.5"))
+
+coefs_crp_cr_nonINT$Model <- "crp_nonadjusted_nonINT"
+
+# revalue the fixed effects names
+coefs_crp_cr_nonINT$FixedEffects <- revalue(
+  coefs_crp_cr_nonINT$Row.names,
+  c(
+    "(Intercept)" = "Intercept",
+    "DaysfromTreatment" = "Time (days)",
+    "phaseOrganic" = "Organic diet",
+    "logcrp_S_BL" = "Baseline crp levels (no cr adjusted)",
+    "creatinine_S"="creatinine"  
+  )
+)
+
+```
+
+```{r tabmodel Model cr, echo=FALSE, include=TRUE}
+# crp
+tab_model(model_crp_cr_nonINT,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(model_crp_cr_nonINT@call$formula[3]))
+
+```
+
+```{r model_crp_cr_nonINT, echo=FALSE}
+
+plot(model_crp_cr_nonINT, resid(.) ~ fitted(.) | phase)
+
+plot(model_crp_cr_nonINT, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(model_crp_cr_nonINT))
+
+```
+
+### Merge the models of objective 1
+
+```{r tabmodel merge the models of objective 1, echo=FALSE, include=TRUE}
+# crp
+tab_model(model_crp,model_crp_cr_nonINT,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = "Merge the models of objective 1")
+
+```
+
+## Model requested by Associate Editor
+
+### Log CRP ~ baseline Log CRP + DaysfromTreatment + phase + log_creatinine + (phase*DaysfromTreatment if p<0.05) + random(...)
+
+```{r  crpmodel_INT_logcr_int, echo=FALSE, include=FALSE}
+
+# model with interaction term
+model_crp_logcr_INT <- lmer(logcrp_S_TR ~ logcrp_S_BL + DaysfromTreatment + phase + logcr_S + phase*DaysfromTreatment +(1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+```
+
+```{r crpmodel_logcr_int, echo=FALSE, include=TRUE}
+# crp
+
+tab_model(model_crp_logcr_INT,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(model_crp_logcr_INT@call$formula[3]))
+# model has been inspected: interaction term p-value>0.05
+
+```
+
+```{r plots_model_crp_logcr_INT, echo=FALSE}
+
+plot(model_crp_logcr_INT, resid(.) ~ fitted(.) | phase)
+
+plot(model_crp_logcr_INT, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(model_crp_logcr_INT))
+
+```
+
+
+```{r  crpmodel_logcr_nonINT , echo=FALSE, include=FALSE}
+
+# model without interaction term
+model_crp_logcr_nonINT <- lmer(logcrp_S_TR ~ logcrp_S_BL + DaysfromTreatment + phase + logcr_S +(1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+# summary(model_crp_logcr_nonINT)
+coefs_crp_logcr_nonINT <- merge(
+  as.data.frame(
+    round(
+      # getting from the model coefficients table
+      # the fixed effects names --- row.names
+      # the estimate --- col. 1
+      # the std. error --- col. 2
+      # the p-value --- col. 5
+      coef(summary(model_crp_logcr_nonINT))[, c(1, 2, 5)],
+      digits = 3
+    )
+  ),
+  as.data.frame(
+    round(
+      # getting the confidence intervals omitting the first 3 rows that
+      # refer to sigma (it is NA in the Wald method)
+      confint.merMod(model_crp_logcr_nonINT, method = "Wald"),
+      digits = 3
+    )[-c(1:3), ]
+  ),
+  by = "row.names"
+)
+
+# change the names in the columns of the CIs
+setnames(coefs_crp_logcr_nonINT, old = c("Pr(>|t|)", "2.5 %", "97.5 %"), new = c("p", "CI2.5", "CI97.5"))
+
+coefs_crp_logcr_nonINT$Model <- "crp_nonadjusted_nonINT"
+
+# revalue the fixed effects names
+coefs_crp_logcr_nonINT$FixedEffects <- revalue(
+  coefs_crp_logcr_nonINT$Row.names,
+  c(
+    "(Intercept)" = "Intercept",
+    "DaysfromTreatment" = "Time (days)",
+    "phaseOrganic" = "Organic diet",
+    "logcrp_S_BL" = "Baseline crp levels (no cr adjusted)",
+    "logcr_S"="log_creatinine"  
+  )
+)
+
+```
+
+```{r tabmodel_logcr, echo=FALSE, include=TRUE}
+# crp
+tab_model(model_crp_logcr_nonINT,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(model_crp_logcr_nonINT@call$formula[3]))
+
+```
+
+```{r model_crp_logcr_nonINT, echo=FALSE}
+
+plot(model_crp_logcr_nonINT, resid(.) ~ fitted(.) | phase)
+
+plot(model_crp_logcr_nonINT, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(model_crp_logcr_nonINT))
+
+```
+
+
+### Models for objective 2
+
+A second model was made to assess the association between biomarker of exposure to pesticides (3-PBA and 6-CN, separately) and biomarker of inflammation (CRP). 
+
+ + Random part: participants
+ + Fixed effect: each biomarker of exposure to pesticides, time (days of treatment, where time=0 was the start of the treatment), age and sex
+
+
+### Log creatinine adjusted CRP ~ Log creatinine adjusted baseline CRP + 6-CN (binary) + DaysfromTreatment + sex + baseline age + random(...)
+
+```{r add 6-CN, echo=FALSE, include=TRUE}
+# crp
+
+Model2<-lmer(logadj_crp_S_TR ~ logadj_crp_S_BL + cnlod + DaysfromTreatment + Sex + age_baseline_S + (1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+# summary(model_crp_noINT)
+
+coefs_model2_noINT <- merge(
+  as.data.frame(
+    round(
+      # getting from the model coefficients table
+      # the fixed effects names --- row.names
+      # the estimate --- col. 1
+      # the std. error --- col. 2
+      # the p-value --- col. 5
+      coef(summary(Model2))[, c(1, 2, 5)],
+      digits = 3
+    )
+  ),
+  as.data.frame(
+    round(
+      # getting the confidence intervals omitting the first 3 rows that
+      # refer to sigma (it is NA in the Wald method)
+      confint.merMod(Model2, method = "Wald"),
+      digits = 3
+    )[-c(1:3), ]
+  ),
+  by = "row.names"
+)
+
+# change the names in the columns of the CIs
+setnames(coefs_model2_noINT, old = c("Pr(>|t|)", "2.5 %", "97.5 %"), new = c("p", "CI2.5", "CI97.5"))
+
+coefs_model2_noINT$Model <- "crpadjusted_6CN"
+
+# revalue the fixed effects names
+coefs_model2_noINT$FixedEffects <- revalue(
+  coefs_model2_noINT$Row.names,
+  c(
+    "cnlodAbove LOD"="6-CN (above LOD)",
+    "logadj_crp_S_BL"="Baseline CRP levels",
+    "DaysfromTreatment" = "Time (days)",
+     "SexFemale"=="Sex (female)",
+    "age_baseline_S"="Age"
+  )
+)
+
+```
+
+```{r echo=FALSE, include=TRUE}
+tab_model(Model2,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(Model2@call$formula[3])
+)
+
+```
+
+```{r diagnostics_model2, echo=FALSE}
+
+plot(Model2, resid(.) ~ fitted(.) | phase)
+
+plot(Model2, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(Model2))
+
+```
+
+### Log CRP ~ log baseline CRP + 6-CN + DaysfromTreatment + sex + baseline age + creatinine_s + random(...)
+
+```{r add 6-CN non adjusted, echo=FALSE, include=TRUE}
+# crp
+
+Model2b<-lmer(logcrp_S_TR ~ logcrp_S_BL + cnlod + DaysfromTreatment + Sex + age_baseline_S + creatinine_S + (1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+# summary(model_crp_noINT)
+
+coefs_Model2b_noINT <- merge(
+  as.data.frame(
+    round(
+      # getting from the model coefficients table
+      # the fixed effects names --- row.names
+      # the estimate --- col. 1
+      # the std. error --- col. 2
+      # the p-value --- col. 5
+      coef(summary(Model2b))[, c(1, 2, 5)],
+      digits = 3
+    )
+  ),
+  as.data.frame(
+    round(
+      # getting the confidence intervals omitting the first 3 rows that
+      # refer to sigma (it is NA in the Wald method)
+      confint.merMod(Model2b, method = "Wald"),
+      digits = 3
+    )[-c(1:3), ]
+  ),
+  by = "row.names"
+)
+
+# change the names in the columns of the CIs
+setnames(coefs_Model2b_noINT, old = c("Pr(>|t|)", "2.5 %", "97.5 %"), new = c("p", "CI2.5", "CI97.5"))
+
+coefs_Model2b_noINT$Model <- "crp_nonadjusted_6CN"
+
+# revalue the fixed effects names
+coefs_Model2b_noINT$FixedEffects <- revalue(
+  coefs_Model2b_noINT$Row.names,
+  c(
+    "cnlodAbove LOD"="6CN (above LOD)",
+    "logcrp_S_BL"="Baseline crp levels (no cr adjusted)",
+    "DaysfromTreatment" = "Time (days)",
+     "SexFemale"=="Sex (female)",
+    "age_baseline_S"="Age",
+    "creatinine_S"="creatinine" 
+    
+  )
+)
+
+```
+
+```{r echo=FALSE, include=TRUE}
+tab_model(Model2b,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(Model2b@call$formula[3])
+)
+
+```
+
+```{r diagnostics_Model2b, echo=FALSE}
+
+plot(Model2b, resid(.) ~ fitted(.) | phase)
+
+plot(Model2b, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(Model2b))
+
+```
+
+### Merge the models of objective 2-6-CN
+
+```{r merge model of objective 2 6-cn, echo=FALSE, include=TRUE}
+
+tab_model(Model2,Model2b,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = "Merge the models of objective 2-6-CN")
+
+```
+
+## Model requested by Associate Editor
+
+### Log CRP ~ log baseline CRP + 6-CN + DaysfromTreatment + sex + baseline age + log-creatinine_s + random(...)
+
+```{r add 6-CNlogcr non adjusted, echo=FALSE, include=TRUE}
+# crp
+
+Model2b_logcr<-lmer(logcrp_S_TR ~ logcrp_S_BL + cnlod + DaysfromTreatment + Sex + age_baseline_S + logcr_S + (1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+```
+
+```{r logcr_6cn, echo=FALSE, include=TRUE}
+
+tab_model(Model2b_logcr,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(Model2b_logcr@call$formula[3])
+)
+
+```
+
+```{r diagnostics_Model2b_logcr, echo=FALSE}
+
+plot(Model2b_logcr, resid(.) ~ fitted(.) | phase)
+
+plot(Model2b_logcr, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(Model2b_logcr))
+
+```
+### Log creatinine adjusted CRP ~ Log creatinine adjusted baseline CRP + creatinine adjusted 3-PBA + DaysfromTreatment + sex + baseline age + random(...)
+
+```{r add 3-PBA, echo=FALSE, include=TRUE}
+# PBA
+
+Model3<-lmer(logadj_crp_S_TR ~ logadj_crp_S_BL + adj_pb1000_S + DaysfromTreatment + Sex + age_baseline_S + (1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+# summary(model_crp_noINT)
+
+coefs_model3_noINT <- merge(
+  as.data.frame(
+    round(
+      # getting from the model coefficients table
+      # the fixed effects names --- row.names
+      # the estimate --- col. 1
+      # the std. error --- col. 2
+      # the p-value --- col. 5
+      coef(summary(Model3))[, c(1, 2, 5)],
+      digits = 3
+    )
+  ),
+  as.data.frame(
+    round(
+      # getting the confidence intervals omitting the first 3 rows that
+      # refer to sigma (it is NA in the Wald method)
+      confint.merMod(Model3, method = "Wald"),
+      digits = 3
+    )[-c(1:3), ]
+  ),
+  by = "row.names"
+)
+
+# change the names in the columns of the CIs
+setnames(coefs_model3_noINT, old = c("Pr(>|t|)", "2.5 %", "97.5 %"), new = c("p", "CI2.5", "CI97.5"))
+
+coefs_model3_noINT$Model <- "crpadjusted_3PBA"
+
+# revalue the fixed effects names
+# revalue the fixed effects names
+coefs_model3_noINT$FixedEffects <- revalue(
+  coefs_model3_noINT$Row.names,
+  c(
+    "adj_pb1000_S"="3PBA",
+    "logadj_crp_S_BL"="Baseline crp levels",
+    "DaysfromTreatment" = "Time (days)",
+     "SexFemale"=="Sex (female)",
+    "age_baseline_S"="Age"
+  )
+)
+
+```
+```{r echo=FALSE, include=TRUE}
+tab_model(Model3,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(Model3@call$formula[3])
+)
+
+```
+
+```{r diagnostics_model3, echo=FALSE}
+
+plot(Model3, resid(.) ~ fitted(.) | phase)
+
+plot(Model3, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(Model3))
+
+```
+
+### Log CRP ~ Log baseline CRP + 3-PBA + DaysfromTreatment + sex + baseline age + creatinine_S + random(...)
+
+```{r add 3-PBA non adjusted, echo=FALSE, include=TRUE}
+# PBA
+
+Model3b<-lmer(logcrp_S_TR ~ logcrp_S_BL + pb1000_S + DaysfromTreatment + Sex + age_baseline_S + creatinine_S + (1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+# summary(model_crp_noINT)
+
+coefs_Model3b_noINT <- merge(
+  as.data.frame(
+    round(
+      # getting from the model coefficients table
+      # the fixed effects names --- row.names
+      # the estimate --- col. 1
+      # the std. error --- col. 2
+      # the p-value --- col. 5
+      coef(summary(Model3b))[, c(1, 2, 5)],
+      digits = 3
+    )
+  ),
+  as.data.frame(
+    round(
+      # getting the confidence intervals omitting the first 3 rows that
+      # refer to sigma (it is NA in the Wald method)
+      confint.merMod(Model3b, method = "Wald"),
+      digits = 3
+    )[-c(1:3), ]
+  ),
+  by = "row.names"
+)
+
+# change the names in the columns of the CIs
+setnames(coefs_Model3b_noINT, old = c("Pr(>|t|)", "2.5 %", "97.5 %"), new = c("p", "CI2.5", "CI97.5"))
+
+coefs_Model3b_noINT$Model <- "crp_nonadjusted_6PBA"
+
+# revalue the fixed effects names
+# revalue the fixed effects names
+coefs_Model3b_noINT$FixedEffects <- revalue(
+  coefs_Model3b_noINT$Row.names,
+  c(
+    "pb1000_S"="3-PBA",
+    "log_crp_S_BL"="Baseline CRP levels (no cr adjusted)",
+    "DaysfromTreatment" = "Time (days)",
+     "SexFemale"=="Sex (female)",
+    "age_baseline_S"="Age",
+    "creatinine_S"="creatinine"
+  )
+)
+
+```
+```{r echo=FALSE, include=TRUE}
+
+tab_model(Model3b,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(Model3b@call$formula[3])
+)
+
+```
+
+```{r diagnostics_Model3b, echo=FALSE}
+
+plot(Model3b, resid(.) ~ fitted(.) | phase)
+
+plot(Model3b, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(Model3b))
+
+```
+
+### Merge the models of objective 2-3-PBA
+
+```{r merge the models of objective 2-3-pba, echo=FALSE, include=TRUE}
+
+tab_model(Model3,Model3b,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = "Merge the models of objective 2 3-BPA")
+
+```
+
+## Model requested by Associate Editor
+
+### Log CRP ~ Log baseline CRP + 3-PBA + DaysfromTreatment + sex + baseline age + logcr_S + random(...)
+
+```{r logcr_3-PBA_nonadjusted, echo=FALSE, include=TRUE}
+# PBA
+
+Model3b_logcr<-lmer(logcrp_S_TR ~ logcrp_S_BL + pb1000_S + DaysfromTreatment + Sex + age_baseline_S + logcr_S + (1 | ID), lmmdata_dates_MOD, na.action = na.exclude)
+
+```
+
+```{r logcr_3pba, echo=FALSE, include=TRUE}
+
+tab_model(Model3b_logcr,
+  show.icc = TRUE,
+  digits = 3, show.obs = TRUE, show.re.var = TRUE,
+  title = paste(Model3b_logcr@call$formula[3])
+)
+
+```
+
+```{r diagnostics_Model3b_logcr, echo=FALSE}
+
+plot(Model3b_logcr, resid(.) ~ fitted(.) | phase)
+
+plot(Model3b_logcr, resid(.) ~ DaysfromTreatment)
+
+qqnorm(resid(Model3b_logcr))
+
+```
+
+
+## Benjamini-Hochberg p-value adjustment - without the intercepts
+
+```{r pvalueadj_all2, echo=FALSE, include=FALSE}
+
+# combine the p-values of all the models made so far
+pvalmod2 <- list(
+  coefs_crp_INT[, c("Model", "FixedEffects", "p")],
+  coefs_crp_cr_nonINT[, c("Model", "FixedEffects", "p")],
+  coefs_model2_noINT[, c("Model", "FixedEffects", "p")],
+  coefs_Model2b_noINT[, c("Model", "FixedEffects", "p")],
+  coefs_model3_noINT[, c("Model", "FixedEffects", "p")],
+  coefs_Model3b_noINT[, c("Model", "FixedEffects", "p")]
+  ) # 2
+
+all_pvalmod2 <- bind_rows(pvalmod2)
+
+### Order data by p-value
+all_pvalmod2 <- all_pvalmod2[order(all_pvalmod2$p), ]
+
+# Benjamini-Hochberg
+all_pvalmod2$BH_p <- round(p.adjust(all_pvalmod2$p, method = "BH", n = 30), digits = 3)
+
+```
+
+`r kable(all_pvalmod2)`
+
+# Session information
+
+```{r session, echo=FALSE}
+sessionInfo()
+```
